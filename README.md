@@ -11,7 +11,7 @@ Tre vyer över perioden 2005–2025:
 
 - **Staplad yta** med alla invandrade per år, uppdelade på födelseland. En knapp växlar
   mellan antal och andel, vilket gör förskjutningarna tydliga: Irak i mitten av 00-talet,
-  Syrien 2015–2016 och Ukraina 2024. Sju serier har egen färg, resten summeras som "Övriga".
+  Syrien 2015–2016 och Ukraina 2024. Åtta serier har egen färg, resten summeras som "Övriga".
 - **Rangordning per år** bland samtliga födelseländer. Landsnamnen står utsatta i båda
   kanterna i stället för i en färgförklaring, så diagrammet går att läsa utan färg.
   Skalan går ned till plats 35, annars försvinner Ukrainas väg från 35 till 1 under axeln.
@@ -27,26 +27,32 @@ Samma invandring visas sedan på tre andra sätt:
 
 ## Färg och färgseende
 
-Ytdiagrammet bär sju färger. Fler färgklasser än så går inte att skilja åt med nedsatt
-färgseende, oavsett palett. De övriga länderna får därför varsin panel i småmultiplarna,
-där alla paneler har samma färg, och i rangordningen bärs identiteten av utsatta namn
-i stället för av färg.
+Ytdiagrammet bär åtta färger, vilket är hela den validerade paletten. Fler färgklasser än
+så går inte att skilja åt med nedsatt färgseende, oavsett palett. De övriga länderna får
+därför varsin panel i småmultiplarna, där alla paneler har samma färg, och i rangordningen
+bärs identiteten av utsatta namn i stället för av färg.
 
-Ett land har alltid samma färg på hela sidan. De sju som har egen färg i ytdiagrammet
-behåller den i rangordningen; de övriga sex ritas neutralt grå. Grått betyder alltså
+Ett land har alltid samma färg på hela sidan. De åtta som har egen färg i ytdiagrammet
+behåller den i rangordningen; de övriga fem ritas neutralt grå. Grått betyder alltså
 "finns inte som egen yta i det övre diagrammet", inte "saknar betydelse".
 
 Paletten är hämtad ur dataviz-riktlinjerna och kontrollerad med deras validator:
 
 ```bash
 node scripts/validate_palette.js \
-  "#2a78d6,#eb6834,#1baf7a,#eda100,#e87ba4,#008300,#4a3aa7" \
+  "#2a78d6,#eb6834,#1baf7a,#eda100,#e87ba4,#008300,#4a3aa7,#e34948" \
   --mode light --surface "#fcfcfb"
 ```
 
-Den passerar ljushetsband, kromafloor, CVD-separation och normalseendefloor. Tre av
-färgerna ligger under 3:1 mot ytan, vilket gör tabellvyn obligatorisk snarare än valfri.
-Banden skiljs dessutom åt av en 2 px lucka i ytans egen färg, som andra kanal utöver färgen.
+Den passerar ljushetsband, kromafloor, CVD-separation och normalseendefloor. Sämsta
+grannpar är guld mot akvamarin, ΔE 9,1 för protanopi mot målet 8, och rosa mot guld,
+ΔE 19,6 för normalseende mot golvet 15. Tre av färgerna ligger under 3:1 mot ytan, vilket
+gör tabellvyn obligatorisk snarare än valfri. Banden skiljs dessutom åt av en 2 px lucka i
+ytans egen färg, som andra kanal utöver färgen.
+
+Restposten "Övriga" är neutralt grå och är med avsikt inte en kategorifärg: den faller på
+validatorns ljushets- och kromatest. Mot grannbandet röd mäter den ΔE 22,9 för CVD och
+29,5 för normalseende, alltså klart över golven.
 
 ## Varför sidan alltid är ljus
 
@@ -155,7 +161,7 @@ tabellen, så kontrollera innan du drar slutsatser av just det året.
 | Inställning | Standard | Betydelse |
 |---|---|---|
 | `START_YEAR` | `2005` | Första år som hämtas |
-| `AREA_N` | `7` | Antal färgade ytor i det staplade diagrammet |
+| `AREA_N` | `8` | Antal färgade ytor i det staplade diagrammet |
 | `PANEL_N` | `13` | Antal länder som får en egen panel i småmultiplarna |
 | `PANEL_COLS` | `4` | Antal kolumner i småmultiplarna |
 | `RANK_BY` | `"peak"` | `"peak"` = största andel ett enskilt år, `"total"` = summa över perioden |
@@ -167,7 +173,14 @@ tabellen, så kontrollera innan du drar slutsatser av just det året.
 hamnar Ukraina först på plats 11 trots 28 065 invandrade under 2024, och hade då hamnat i
 "Övriga". På `"peak"` hamnar Ukraina på plats 2.
 
-Höj inte `AREA_N` över sju utan att köra om validatorn.
+`AREA_N` är satt till paletten hela längd. Att höja den kräver fler kategorifärger, och
+åtta är vad paletten rymmer — kör om validatorn på en ny uppsättning innan du gör det.
+
+Gränsen för att hamna i "Övriga" följer av `AREA_N` och är ingen fast nivå. Med nuvarande
+data går snittet mellan Afghanistan, som nådde 6,43 procent av invandringen 2017, och
+Eritrea, som som mest nådde 5,09 procent 2015. Observera att kriteriet är andel och inte
+antal: Afghanistans 9 297 under 2017 är fler än Indiens 7 480 under 2023, men 2017 var ett
+större invandringsår, så Indien ligger högre på andelen.
 
 ## Licens
 

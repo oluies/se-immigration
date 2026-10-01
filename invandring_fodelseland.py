@@ -31,10 +31,11 @@ BASE = "https://api.scb.se/OV0104/v1/doris/sv/ssd/BE/BE0101/BE0101J"
 TABLES = ["ImmiEmiFod", "ImmiEmiFodCKM"]   # 2000-2024 respektive 2025 (CKM)
 START_YEAR = 2005
 
-# Ytdiagrammet bär sju färger. Fler färgklasser än så går inte att skilja åt med
-# nedsatt färgseende, oavsett palett, så resten av länderna får varsin panel i
-# småmultiplarna i stället, där färg inte behöver särskilja någonting.
-AREA_N = 7                  # antal färgade ytor, resten summeras som "Övriga"
+# Ytdiagrammet bär åtta färger, vilket är hela den validerade paletten. Fler
+# färgklasser än så går inte att skilja åt med nedsatt färgseende, oavsett palett,
+# så resten av länderna får varsin panel i småmultiplarna i stället, där färg inte
+# behöver särskilja någonting.
+AREA_N = 8                  # antal färgade ytor, resten summeras som "Övriga"
 PANEL_N = 13                # antal länder som får en egen panel i småmultiplarna
 PANEL_COLS = 4
 RANK_BY = "peak"            # "peak" = största andel ett enskilt år, "total" = summa över perioden
@@ -48,7 +49,10 @@ OTHER_LABEL = "Övriga"
 # klarar kontrollen av intilliggande par. Stegen för mörkt läge är valda för den
 # mörka ytan, inte uträknade ur de ljusa.
 #   node scripts/validate_palette.js "<hex,...>" --mode light --surface "#fcfcfb"
-SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7"]
+# Sämsta grannpar: guld/akvamarin ΔE 9,1 för protanopi och rosa/guld ΔE 19,6 för
+# normalseende. Höj inte AREA_N över 8 utan att byta palett.
+SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7",
+          "#e34948"]
 
 # Sidan ritas alltid mot ljus yta. Ett mörkt läge kräver egna, separat validerade
 # steg för varje färg och ett eget bläck i varje ruta — inklusive Plotlys hover,
