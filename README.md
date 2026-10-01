@@ -30,8 +30,7 @@ Ett land har alltid samma färg på hela sidan. De sju som har egen färg i ytdi
 behåller den i rangordningen; de övriga sex ritas neutralt grå. Grått betyder alltså
 "finns inte som egen yta i det övre diagrammet", inte "saknar betydelse".
 
-Paletten är hämtad ur dataviz-riktlinjerna och kontrollerad med deras validator, separat
-för ljus och mörk yta:
+Paletten är hämtad ur dataviz-riktlinjerna och kontrollerad med deras validator:
 
 ```bash
 node scripts/validate_palette.js \
@@ -39,11 +38,20 @@ node scripts/validate_palette.js \
   --mode light --surface "#fcfcfb"
 ```
 
-Båda lägena passerar ljushetsband, kromafloor, CVD-separation och normalseendefloor. I
-ljust läge ligger tre av färgerna under 3:1 mot ytan, vilket gör tabellvyn obligatorisk
-snarare än valfri. Banden skiljs dessutom åt av en 2 px lucka i ytans egen färg, som andra
-kanal utöver färgen. Stegen för mörkt läge är egna val för den mörka ytan, inte uträknade
-ur de ljusa.
+Den passerar ljushetsband, kromafloor, CVD-separation och normalseendefloor. Tre av
+färgerna ligger under 3:1 mot ytan, vilket gör tabellvyn obligatorisk snarare än valfri.
+Banden skiljs dessutom åt av en 2 px lucka i ytans egen färg, som andra kanal utöver färgen.
+
+## Varför sidan alltid är ljus
+
+Sidan ritas mot ljus yta oavsett systemets inställning. Ett mörkt läge kräver egna,
+separat validerade steg för varje färg och rätt bläck i varje enskild ruta. Plotlys
+hover-ruta har vit botten som inte följer med ett tema, så en global ljus textfärg ger
+vit text på vitt — vilket också var det som fick mörkt läge att tas bort här.
+
+Textfärg och hover-ruta sätts därför uttryckligen i varje diagram i stället för att ärvas,
+och landsnamnet i hover-rutan står i textbläck, inte i seriens färg, eftersom flera av
+färgerna ligger under 3:1 mot vitt.
 
 ## Datakällor
 
