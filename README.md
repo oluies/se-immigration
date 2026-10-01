@@ -7,14 +7,35 @@ och publicerad som en interaktiv sida.
 
 ## Vad som visas
 
-Två diagram över perioden 2005–2025:
+Tre vyer över perioden 2005–2025:
 
 - **Staplad yta** med alla invandrade per år, uppdelade på födelseland. En knapp växlar
   mellan antal och andel, vilket gör förskjutningarna tydliga: Irak i mitten av 00-talet,
-  Syrien 2015–2016 och Ukraina 2024.
-- **Rangordning per år** som följer hur serierna byter plats på topplistan.
+  Syrien 2015–2016 och Ukraina 2024. Sju serier har egen färg, resten summeras som "Övriga".
+- **Småmultiplar**, ett litet linjediagram per land med egen y-skala, så att Syrien 2016
+  inte trycker ihop allt annat. Toppvärdet skrivs ut i varje panel.
+- **Tabellvy** med alla värden, utfällbar under diagrammen.
 
-De 13 största serierna redovisas separat och resten summeras som "Övriga".
+## Färg och färgseende
+
+Ytdiagrammet bär sju färger. Fler färgklasser än så går inte att skilja åt med nedsatt
+färgseende, oavsett palett, så de övriga länderna får varsin panel i småmultiplarna i
+stället, där alla paneler har samma färg och färg därmed inte behöver särskilja någonting.
+
+Paletten är hämtad ur dataviz-riktlinjerna och kontrollerad med deras validator, separat
+för ljus och mörk yta:
+
+```bash
+node scripts/validate_palette.js \
+  "#2a78d6,#eb6834,#1baf7a,#eda100,#e87ba4,#008300,#4a3aa7" \
+  --mode light --surface "#fcfcfb"
+```
+
+Båda lägena passerar ljushetsband, kromafloor, CVD-separation och normalseendefloor. I
+ljust läge ligger tre av färgerna under 3:1 mot ytan, vilket gör tabellvyn obligatorisk
+snarare än valfri. Banden skiljs dessutom åt av en 2 px lucka i ytans egen färg, som andra
+kanal utöver färgen. Stegen för mörkt läge är egna val för den mörka ytan, inte uträknade
+ur de ljusa.
 
 ## Datakällor
 
@@ -76,15 +97,18 @@ tabellen, så kontrollera innan du drar slutsatser av just det året.
 | Inställning | Standard | Betydelse |
 |---|---|---|
 | `START_YEAR` | `2005` | Första år som hämtas |
-| `TOP_N` | `13` | Antal serier som redovisas separat |
+| `AREA_N` | `7` | Antal färgade ytor i det staplade diagrammet |
+| `PANEL_N` | `13` | Antal länder som får en egen panel i småmultiplarna |
 | `RANK_BY` | `"peak"` | `"peak"` = största andel ett enskilt år, `"total"` = summa över perioden |
-| `ALWAYS_INCLUDE` | `("USA", "Storbritannien", "Ryssland")` | Serier som alltid visas separat |
+| `ALWAYS_INCLUDE` | `("USA", "Storbritannien", "Ryssland")` | Får alltid en egen panel |
 | `INCLUDE_SWEDEN` | `True` | Ta med återinvandrade födda i Sverige |
 | `GROUP_EU` | `True` | Slå ihop EU-länderna till en serie |
 
 `RANK_BY` spelar roll för länder med en kort men kraftig topp. På summan över hela perioden
 hamnar Ukraina först på plats 11 trots 28 065 invandrade under 2024, och hade då hamnat i
 "Övriga". På `"peak"` hamnar Ukraina på plats 2.
+
+Höj inte `AREA_N` över sju utan att köra om validatorn.
 
 ## Licens
 

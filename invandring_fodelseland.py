@@ -19,26 +19,49 @@ Utan --refresh används de data som redan ligger i DuckDB-filen.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import duckdb
 import pandas as pd
 import plotly.graph_objects as go
 import requests
-from plotly.colors import qualitative
+from plotly.subplots import make_subplots
 
 BASE = "https://api.scb.se/OV0104/v1/doris/sv/ssd/BE/BE0101/BE0101J"
 TABLES = ["ImmiEmiFod", "ImmiEmiFodCKM"]   # 2000-2024 respektive 2025 (CKM)
 START_YEAR = 2005
 
-TOP_N = 13                  # antal serier som visas separat, resten blir "Övriga"
+# Ytdiagrammet bär sju färger. Fler färgklasser än så går inte att skilja åt med
+# nedsatt färgseende, oavsett palett, så resten av länderna får varsin panel i
+# småmultiplarna i stället, där färg inte behöver särskilja någonting.
+AREA_N = 7                  # antal färgade ytor, resten summeras som "Övriga"
+PANEL_N = 13                # antal länder som får en egen panel i småmultiplarna
+PANEL_COLS = 4
 RANK_BY = "peak"            # "peak" = största andel ett enskilt år, "total" = summa över perioden
-ALWAYS_INCLUDE = ("USA", "Storbritannien", "Ryssland")   # visas alltid separat
+ALWAYS_INCLUDE = ("USA", "Storbritannien", "Ryssland")   # får alltid en egen panel
 INCLUDE_SWEDEN = True       # återinvandrade födda i Sverige
 GROUP_EU = True             # slå ihop EU-länderna till en serie
 EU_LABEL = "EU utom Sverige"
 OTHER_LABEL = "Övriga"
-OTHER_COLOR = "#b4b8c2"     # neutral grå, så att restposten inte krockar med palettens färger
+
+# Kategorifärger ur dataviz-riktlinjernas validerade palett, i den ordning som
+# klarar kontrollen av intilliggande par. Stegen för mörkt läge är valda för den
+# mörka ytan, inte uträknade ur de ljusa.
+#   node scripts/validate_palette.js "<hex,...>" --mode light --surface "#fcfcfb"
+SERIES_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7"]
+SERIES_DARK = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9"]
+OTHER_LIGHT, OTHER_DARK = "#cfcec6", "#3c3c38"
+
+# Diagrammens ytor och text, ur samma riktlinjer.
+THEME = {
+    "light": dict(surface="#fcfcfb", page="#f9f9f7", ink="#0b0b0b", second="#52514e",
+                  muted="#898781", grid="#e1e0d9", axis="#c3c2b7",
+                  series=SERIES_LIGHT, other=OTHER_LIGHT),
+    "dark": dict(surface="#1a1a19", page="#0d0d0d", ink="#ffffff", second="#c3c2b7",
+                 muted="#898781", grid="#2c2c2a", axis="#383835",
+                 series=SERIES_DARK, other=OTHER_DARK),
+}
 
 DB = Path("data/immigration.duckdb")
 OUT = Path("docs/index.html")
@@ -158,17 +181,17 @@ def load(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
 # Diagram
 # --------------------------------------------------------------------------- #
 
-def select(wide: pd.DataFrame) -> list[str]:
-    """Väljer vilka serier som får en egen yta.
+def select(wide: pd.DataFrame, n: int, forced: tuple[str, ...] = ()) -> list[str]:
+    """Väljer de n viktigaste serierna, med eventuella påtvingade först.
 
     "total" rangordnar efter summan över hela perioden och missar då länder med
     en kort men kraftig topp: Ukraina hamnar på plats 11 trots 28 065 invandrade
     2024. "peak" rangordnar i stället efter största andel ett enskilt år.
     """
     score = wide.div(wide.sum(axis=1), axis=0).max() if RANK_BY == "peak" else wide.sum()
-    picked = [c for c in ALWAYS_INCLUDE if c in wide.columns]
+    picked = [c for c in forced if c in wide.columns]
     for c in score.sort_values(ascending=False).index:
-        if len(picked) >= TOP_N:
+        if len(picked) >= n:
             break
         if c not in picked:
             picked.append(c)
@@ -181,71 +204,123 @@ def rgba(hex_color: str, alpha: float) -> str:
     return f"rgba({r},{g},{b},{alpha})"
 
 
-def palette(series: list[str]) -> dict[str, str]:
-    """En färg per serie, delad av båda diagrammen.
+def fmt(n: float) -> str:
+    return f"{int(round(n)):,}".replace(",", " ")
 
-    Plotlys standardpalett har tio färger. Med fler serier än så återanvänds de,
-    och det översta och nedersta bandet i ytdiagrammet blir omöjliga att skilja åt.
+
+# --------------------------------------------------------------------------- #
+# Diagram
+# --------------------------------------------------------------------------- #
+
+def area_figure(stacked: pd.DataFrame, t: dict) -> go.Figure:
+    """Staplad yta över de färgade serierna plus restposten.
+
+    Serierna får färg efter sin plats i stapeln, så att två intilliggande band
+    alltid är intilliggande slots i paletten — det är den ordningen validatorn
+    kontrollerar. Banden skiljs åt av en 2 px linje i ytans egen färg i stället
+    för en kontrasterande kantlinje.
     """
-    colors = qualitative.Dark24
-    out = {c: colors[i % len(colors)] for i, c in enumerate(c for c in series if c != OTHER_LABEL)}
-    out[OTHER_LABEL] = OTHER_COLOR
-    return out
-
-
-def figures(df: pd.DataFrame) -> tuple[go.Figure, go.Figure, list[str], int, int]:
-    wide = df.pivot_table(index="year", columns="country", values="value", aggfunc="sum").fillna(0)
-    ranks = wide.rank(axis=1, ascending=False, method="first")
-
-    top = select(wide)
-    stacked = wide[top].copy()
-    stacked[OTHER_LABEL] = wide.drop(columns=top).sum(axis=1)
-    order = stacked.sum().sort_values(ascending=False).index.drop(OTHER_LABEL).tolist()
-    stacked = stacked[order + [OTHER_LABEL]]
-    color = palette(list(stacked.columns))
-
-    y0, y1 = int(stacked.index.min()), int(stacked.index.max())
-
-    # Staplad yta med växling mellan antal och andel
-    area = go.Figure()
-    for c in stacked.columns:
-        area.add_trace(go.Scatter(
+    fig = go.Figure()
+    for i, c in enumerate(stacked.columns):
+        hue = t["other"] if c == OTHER_LABEL else t["series"][i % len(t["series"])]
+        fig.add_trace(go.Scatter(
             x=stacked.index, y=stacked[c], name=c, stackgroup="one", mode="lines",
-            line=dict(width=0.5, color=color[c]), fillcolor=rgba(color[c], 0.75),
-            hovertemplate="%{x}: %{y:,.0f}<extra>" + c + "</extra>"))
-    area.update_layout(
-        title=dict(text=f"Invandrade till Sverige efter födelseland, {y0}–{y1}",
-                   x=0, xanchor="left", y=0.97, yanchor="top"),
+            line=dict(width=2, color=t["surface"]), fillcolor=rgba(hue, 0.95),
+            hovertemplate="%{y:,.0f}<extra>" + c + "</extra>"))
+    fig.update_layout(
+        title=dict(text="Alla invandrade per år, uppdelade på födelseland",
+                   x=0, xanchor="left", y=0.97, yanchor="top", font=dict(size=17)),
         yaxis_title="Antal invandrade", hovermode="x unified", template="plotly_white",
-        height=620, margin=dict(t=130, l=70, r=40),
+        height=560, margin=dict(t=120, l=72, r=24, b=56),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        legend=dict(traceorder="reversed"),
+        legend=dict(traceorder="reversed", font=dict(size=12)),
         # Knapparna behåller fasta färger, annars blir texten oläslig när sidan
         # växlar till mörkt läge och den globala textfärgen blir ljus.
         updatemenus=[dict(type="buttons", direction="right", x=0, xanchor="left",
-                          y=1.08, yanchor="bottom", bgcolor="#ffffff",
-                          bordercolor="#c8ccd4", font=dict(color="#1c1f26"), buttons=[
+                          y=1.07, yanchor="bottom", bgcolor="#ffffff",
+                          bordercolor="#c3c2b7", font=dict(color="#0b0b0b", size=12), buttons=[
             dict(label="Antal", method="update",
                  args=[{"groupnorm": ""}, {"yaxis.title.text": "Antal invandrade"}]),
             dict(label="Andel (%)", method="update",
                  args=[{"groupnorm": "percent"}, {"yaxis.title.text": "Andel av invandrade, %"}]),
         ])])
+    fig.update_xaxes(gridcolor=t["grid"], linecolor=t["axis"], tickfont=dict(color=t["muted"]))
+    fig.update_yaxes(gridcolor=t["grid"], linecolor=t["axis"], tickfont=dict(color=t["muted"]))
+    return fig
 
-    # Rangordning per år bland samtliga serier
-    bump = go.Figure()
-    for c in top:
-        bump.add_trace(go.Scatter(
-            x=ranks.index, y=ranks[c], name=c, mode="lines+markers",
-            line=dict(color=color[c]), marker=dict(color=color[c]), customdata=wide[c],
-            hovertemplate="%{x}: plats %{y:.0f} (%{customdata:,.0f})<extra>" + c + "</extra>"))
-    bump.update_layout(
-        title=dict(text="Rangordning per år" + (" (EU räknat som en grupp)" if GROUP_EU else
-                                                " bland födelseländer"), x=0, xanchor="left"),
-        yaxis=dict(title="Plats", dtick=1, range=[TOP_N + 10.5, 0.5]),
-        height=600, margin=dict(t=70, l=70, r=40), template="plotly_white",
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
 
-    return area, bump, top, y0, y1
+def panels_figure(wide: pd.DataFrame, panels: list[str], t: dict) -> go.Figure:
+    """Ett litet linjediagram per land, alla i samma färg.
+
+    Varje panel har egen y-skala, annars dränker Syrien 2016 allt annat. Toppens
+    värde skrivs ut i panelen, så att skalorna går att jämföra ändå.
+    """
+    rows = -(-len(panels) // PANEL_COLS)
+    fig = make_subplots(rows=rows, cols=PANEL_COLS, subplot_titles=panels,
+                        vertical_spacing=0.10, horizontal_spacing=0.055)
+    hue = t["series"][0]
+    for i, c in enumerate(panels):
+        r, col = divmod(i, PANEL_COLS)
+        r, col = r + 1, col + 1
+        y = wide[c]
+        fig.add_trace(go.Scatter(
+            x=y.index, y=y, name=c, mode="lines", line=dict(width=2, color=hue),
+            fill="tozeroy", fillcolor=rgba(hue, 0.10), showlegend=False,
+            hovertemplate="%{x}: %{y:,.0f}<extra>" + c + "</extra>"), row=r, col=col)
+        peak = y.idxmax()
+        fig.add_annotation(row=r, col=col, x=peak, y=y[peak], text=fmt(y[peak]),
+                           showarrow=False, yshift=11, font=dict(size=10, color=t["muted"]))
+        fig.update_yaxes(row=r, col=col, range=[0, y.max() * 1.32], showticklabels=False,
+                         showgrid=False, zeroline=True, zerolinecolor=t["axis"],
+                         zerolinewidth=1)
+        fig.update_xaxes(row=r, col=col, tickvals=[y.index.min(), y.index.max()],
+                         showgrid=False, linecolor=t["axis"],
+                         tickfont=dict(size=10, color=t["muted"]))
+    for a in fig.layout.annotations[:len(panels)]:
+        a.font = dict(size=12, color=t["second"])
+    fig.update_layout(
+        title=dict(text="Varje land för sig, med egen skala",
+                   x=0, xanchor="left", font=dict(size=17)),
+        height=170 * rows + 90, margin=dict(t=90, l=24, r=24, b=24),
+        template="plotly_white", paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)", hovermode="x")
+    return fig
+
+
+def table_html(wide: pd.DataFrame, panels: list[str]) -> str:
+    """Tabellvyn. Riktlinjerna kräver en för varje diagram, och tre av färgerna
+    i ljust läge ligger under 3:1 mot ytan, vilket gör den obligatorisk."""
+    cols = panels + [OTHER_LABEL, "Totalt"]
+    out = wide[panels].copy()
+    out[OTHER_LABEL] = wide.drop(columns=panels).sum(axis=1)
+    out["Totalt"] = wide.sum(axis=1)
+    head = "".join(f"<th scope='col'>{c}</th>" for c in cols)
+    body = "".join(
+        f"<tr><th scope='row'>{y}</th>"
+        + "".join(f"<td>{fmt(out.loc[y, c])}</td>" for c in cols)
+        + "</tr>"
+        for y in out.index)
+    return (f"<table><caption>Invandrade per år och födelseland</caption>"
+            f"<thead><tr><th scope='col'>År</th>{head}</tr></thead>"
+            f"<tbody>{body}</tbody></table>")
+
+
+def figures(df: pd.DataFrame):
+    wide = df.pivot_table(index="year", columns="country", values="value", aggfunc="sum").fillna(0)
+
+    area_series = select(wide, AREA_N)
+    panels = select(wide, PANEL_N, ALWAYS_INCLUDE)
+    panels = wide[panels].sum().sort_values(ascending=False).index.tolist()
+
+    stacked = wide[area_series].copy()
+    stacked[OTHER_LABEL] = wide.drop(columns=area_series).sum(axis=1)
+    order = stacked.sum().sort_values(ascending=False).index.drop(OTHER_LABEL).tolist()
+    stacked = stacked[order + [OTHER_LABEL]]
+
+    # Sidan ritas i ljusa färger och byter själv till de mörka stegen vid behov.
+    area = area_figure(stacked, THEME["light"])
+    panel = panels_figure(wide, panels, THEME["light"])
+    return area, panel, table_html(wide, panels), stacked, panels
 
 
 PAGE = """<!doctype html>
@@ -256,27 +331,54 @@ PAGE = """<!doctype html>
 <title>Invandring till Sverige efter födelseland</title>
 <meta name="description" content="Invandrade till Sverige efter födelseland {y0}–{y1}, enligt SCB:s statistikdatabas.">
 <style>
-  :root {{ color-scheme: light dark; --bg:#ffffff; --fg:#1c1f26; --muted:#5b6170; --rule:#e3e6ec; }}
-  @media (prefers-color-scheme: dark) {{
-    :root {{ --bg:#14171c; --fg:#e8eaf0; --muted:#9aa2b1; --rule:#2a2f38; }}
+  :root {{
+    color-scheme: light;
+    --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --second:#52514e;
+    --muted:#898781; --rule:#e1e0d9; --axis:#c3c2b7;
   }}
-  html {{ background: var(--bg); }}
-  body {{ margin:0 auto; padding:2.5rem 16px 4rem; max-width:1100px; background:var(--bg);
-         color:var(--fg); font:16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }}
-  h1 {{ font-size:1.75rem; line-height:1.25; margin:0 0 .5rem; }}
-  p.lead {{ color:var(--muted); margin:0 0 2rem; max-width:65ch; }}
-  .chart {{ margin:0 0 3rem; }}
-  footer {{ border-top:1px solid var(--rule); padding-top:1rem; color:var(--muted); font-size:.85rem; max-width:80ch; }}
+  @media (prefers-color-scheme: dark) {{
+    :root {{
+      color-scheme: dark;
+      --page:#0d0d0d; --surface:#1a1a19; --ink:#ffffff; --second:#c3c2b7;
+      --muted:#898781; --rule:#2c2c2a; --axis:#383835;
+    }}
+  }}
+  html {{ background: var(--page); }}
+  body {{ margin:0 auto; padding:2.5rem 16px 4rem; max-width:1140px; background:var(--page);
+         color:var(--ink); font:16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }}
+  h1 {{ font-size:1.75rem; line-height:1.25; margin:0 0 .5rem; letter-spacing:-.01em; }}
+  p.lead {{ color:var(--second); margin:0 0 2.25rem; max-width:68ch; }}
+  .chart {{ background:var(--surface); border:1px solid var(--rule); border-radius:10px;
+           padding:.75rem .5rem; margin:0 0 1.75rem; }}
+  details {{ margin:0 0 2.5rem; }}
+  summary {{ cursor:pointer; color:var(--second); padding:.5rem 0; }}
+  .scroll {{ overflow-x:auto; }}
+  table {{ border-collapse:collapse; font-size:.8rem; font-variant-numeric:tabular-nums;
+          margin-top:.75rem; }}
+  caption {{ text-align:left; color:var(--second); padding-bottom:.5rem; font-size:.85rem; }}
+  th, td {{ padding:.3rem .55rem; border-bottom:1px solid var(--rule); white-space:nowrap; }}
+  td {{ text-align:right; color:var(--second); }}
+  thead th {{ text-align:right; color:var(--ink); font-weight:600; position:sticky; top:0;
+             background:var(--page); }}
+  thead th:first-child, tbody th {{ text-align:left; }}
+  tbody th {{ color:var(--ink); font-weight:600; }}
+  footer {{ border-top:1px solid var(--rule); padding-top:1rem; color:var(--second);
+           font-size:.85rem; max-width:80ch; }}
   footer a {{ color:inherit; }}
 </style>
 </head>
 <body>
 <h1>Invandring till Sverige efter födelseland, {y0}–{y1}</h1>
 <p class="lead">Antal invandrade per år och födelseland enligt SCB:s statistikdatabas.
-Växla mellan antal och andel i det övre diagrammet. De {n} största serierna redovisas
-separat, övriga födelseländer summeras.</p>
+Det övre diagrammet växlar mellan antal och andel. De {n_area} största serierna har egen
+färg där och resten summeras; varje enskilt land finns i stället som en egen panel längre
+ned, där färg inte behöver skilja något åt. Alla värden finns i tabellen.</p>
 <div class="chart">{area}</div>
-<div class="chart">{bump}</div>
+<div class="chart">{panels}</div>
+<details>
+<summary>Visa alla värden som tabell</summary>
+<div class="scroll">{table}</div>
+</details>
 <footer>
 <p>Källa: SCB, Statistikdatabasen, Invandrare och utvandrare efter födelseland och kön
 (tabellerna ImmiEmiFod och ImmiEmiFodCKM). Uppgifterna för {y1} redovisas med kontrollerad
@@ -288,20 +390,42 @@ födda i Sverige.</p>
 </footer>
 <script>
 // Plotly har ingen egen koppling till prefers-color-scheme. Diagrammen ritas med
-// genomskinlig bakgrund och får text- och rutnätsfärg härifrån i stället.
+// genomskinlig bakgrund och får text-, rutnäts- och seriefärger härifrån i stället.
 (function () {{
+  var SWAP = {swap};
+  var LIGHT = {light};
+  var DARK = {dark};
   var mq = window.matchMedia("(prefers-color-scheme: dark)");
+
   function apply() {{
-    var dark = mq.matches;
-    var fg = dark ? "#e8eaf0" : "#1c1f26";
-    var grid = dark ? "rgba(232,234,240,0.14)" : "rgba(28,31,38,0.12)";
-    document.querySelectorAll(".js-plotly-plot").forEach(function (gd) {{
+    var t = mq.matches ? DARK : LIGHT;
+    var plots = document.querySelectorAll(".js-plotly-plot");
+    plots.forEach(function (gd, i) {{
       Plotly.relayout(gd, {{
-        "font.color": fg, "title.font.color": fg, "legend.font.color": fg,
-        "xaxis.gridcolor": grid, "yaxis.gridcolor": grid,
-        "xaxis.linecolor": grid, "yaxis.linecolor": grid,
-        "xaxis.zerolinecolor": grid, "yaxis.zerolinecolor": grid
+        "font.color": t.ink, "title.font.color": t.ink, "legend.font.color": t.ink,
+        "xaxis.title.font.color": t.second, "yaxis.title.font.color": t.second
       }});
+      var ax = {{}};
+      Object.keys(gd.layout).forEach(function (k) {{
+        if (/^[xy]axis\\d*$/.test(k)) {{
+          ax[k + ".gridcolor"] = t.grid;
+          ax[k + ".linecolor"] = t.axis;
+          ax[k + ".zerolinecolor"] = t.axis;
+          ax[k + ".tickfont.color"] = t.muted;
+        }}
+      }});
+      Plotly.relayout(gd, ax);
+      if (i === 0) {{
+        Plotly.restyle(gd, {{
+          "fillcolor": (mq.matches ? SWAP.area.dark : SWAP.area.light),
+          "line.color": t.surface
+        }});
+      }} else {{
+        Plotly.restyle(gd, {{
+          "line.color": (mq.matches ? SWAP.panels.dark.line : SWAP.panels.light.line),
+          "fillcolor": (mq.matches ? SWAP.panels.dark.fill : SWAP.panels.light.fill)
+        }});
+      }}
     }});
   }}
   apply();
@@ -316,16 +440,35 @@ REPO = "oluies/se-immigration"
 
 
 def build(df: pd.DataFrame) -> None:
-    area, bump, top, y0, y1 = figures(df)
+    area, panel, table, stacked, panels = figures(df)
+    y0, y1 = int(stacked.index.min()), int(stacked.index.max())
+    light, dark = THEME["light"], THEME["dark"]
+
+    def fills(t: dict) -> list[str]:
+        return [rgba(t["other"] if c == OTHER_LABEL else t["series"][i % len(t["series"])], 0.95)
+                for i, c in enumerate(stacked.columns)]
+
+    swap = {
+        "area": {"light": fills(light), "dark": fills(dark)},
+        "panels": {
+            "light": {"line": light["series"][0], "fill": rgba(light["series"][0], 0.10)},
+            "dark": {"line": dark["series"][0], "fill": rgba(dark["series"][0], 0.10)},
+        },
+    }
+    tokens = {m: {k: THEME[m][k] for k in ("surface", "ink", "second", "muted", "grid", "axis")}
+              for m in ("light", "dark")}
+
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(PAGE.format(
-        y0=y0, y1=y1, n=len(top), repo=REPO,
+        y0=y0, y1=y1, n_area=AREA_N, repo=REPO, table=table,
+        swap=json.dumps(swap, ensure_ascii=False),
+        light=json.dumps(tokens["light"]), dark=json.dumps(tokens["dark"]),
         area=area.to_html(full_html=False, include_plotlyjs="cdn",
                           config={"displaylogo": False, "responsive": True}),
-        bump=bump.to_html(full_html=False, include_plotlyjs=False,
-                          config={"displaylogo": False, "responsive": True}),
+        panels=panel.to_html(full_html=False, include_plotlyjs=False,
+                             config={"displaylogo": False, "responsive": True}),
     ), encoding="utf-8")
-    print(f"Skrev {OUT} ({y1 - y0 + 1} år, {len(top)} serier redovisade separat)")
+    print(f"Skrev {OUT} ({y1 - y0 + 1} år, {AREA_N} färgade ytor, {len(panels)} paneler)")
 
 
 def main() -> None:
