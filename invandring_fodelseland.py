@@ -36,7 +36,7 @@ START_YEAR = 2005
 # så resten av länderna får varsin panel i småmultiplarna i stället, där färg inte
 # behöver särskilja någonting.
 AREA_N = 8                  # antal färgade ytor, resten summeras som "Övriga"
-PANEL_N = 13                # antal länder som får en egen panel i småmultiplarna
+PANEL_N = 16                # antal länder som får en egen panel i småmultiplarna
 PANEL_COLS = 4
 RANK_BY = "peak"            # "peak" = största andel ett enskilt år, "total" = summa över perioden
 ALWAYS_INCLUDE = ("USA", "Storbritannien", "Ryssland")   # får alltid en egen panel

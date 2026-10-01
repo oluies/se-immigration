@@ -12,7 +12,7 @@ Tre vyer över perioden 2005–2025:
 - **Staplad yta** med alla invandrade per år, uppdelade på födelseland. En knapp växlar
   mellan antal och andel, vilket gör förskjutningarna tydliga: Irak i mitten av 00-talet,
   Syrien 2015–2016 och Ukraina 2024. Åtta serier har egen färg, resten summeras som "Övriga".
-- **Rangordning per år** bland samtliga födelseländer. Landsnamnen står utsatta i båda
+- **Rangordning per år** bland samtliga födelseländer, för samma urval som panelerna. Landsnamnen står utsatta i båda
   kanterna i stället för i en färgförklaring, så diagrammet går att läsa utan färg.
   Skalan går ned till plats 35, annars försvinner Ukrainas väg från 35 till 1 under axeln.
 - **Småmultiplar**, ett litet linjediagram per land med egen y-skala, så att Syrien 2016
@@ -33,8 +33,12 @@ därför varsin panel i småmultiplarna, där alla paneler har samma färg, och 
 bärs identiteten av utsatta namn i stället för av färg.
 
 Ett land har alltid samma färg på hela sidan. De åtta som har egen färg i ytdiagrammet
-behåller den i rangordningen; de övriga fem ritas neutralt grå. Grått betyder alltså
+behåller den i rangordningen; de övriga åtta ritas neutralt grå. Grått betyder alltså
 "finns inte som egen yta i det övre diagrammet", inte "saknar betydelse".
+
+`PANEL_N` kan höjas fritt, eftersom småmultiplarna inte använder färg för att särskilja
+något. Priset tas ut i rangordningen, som visar samma urval: där blir de grå linjerna
+fler och svårare att följa mellan kanterna. Vid 16 serier är åtta grå.
 
 Paletten är hämtad ur dataviz-riktlinjerna och kontrollerad med deras validator:
 
@@ -162,7 +166,7 @@ tabellen, så kontrollera innan du drar slutsatser av just det året.
 |---|---|---|
 | `START_YEAR` | `2005` | Första år som hämtas |
 | `AREA_N` | `8` | Antal färgade ytor i det staplade diagrammet |
-| `PANEL_N` | `13` | Antal länder som får en egen panel i småmultiplarna |
+| `PANEL_N` | `16` | Antal länder som får en egen panel i småmultiplarna |
 | `PANEL_COLS` | `4` | Antal kolumner i småmultiplarna |
 | `RANK_BY` | `"peak"` | `"peak"` = största andel ett enskilt år, `"total"` = summa över perioden |
 | `ALWAYS_INCLUDE` | `("USA", "Storbritannien", "Ryssland")` | Får alltid en egen panel |
