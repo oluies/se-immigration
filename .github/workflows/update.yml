@@ -1,0 +1,33 @@
+name: Uppdatera data och sida
+
+# Körs manuellt eller i mars varje år, när SCB publicerat föregående års statistik.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 1 3 *"
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Hämta från SCB och bygg om sidan
+        run: uv run invandring_fodelseland.py --refresh
+
+      - name: Committa om något ändrats
+        run: |
+          if git diff --quiet; then
+            echo "Inga ändringar."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/immigration.duckdb docs/index.html
+          git commit -m "Uppdatera data från SCB"
+          git push
