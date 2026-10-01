@@ -287,6 +287,51 @@ def panels_figure(wide: pd.DataFrame, panels: list[str], t: dict) -> go.Figure:
     return fig
 
 
+def rank_figure(wide: pd.DataFrame, panels: list[str], hues: dict[str, str], t: dict) -> go.Figure:
+    """Rangordning per år, med landsnamnen utsatta i båda kanterna.
+
+    Identiteten bärs av namnen, inte av färgen, så diagrammet fungerar utan
+    färgseende. De sju länder som har egen färg i ytdiagrammet behåller sin färg
+    här, resten är neutralt grå — samma land har alltid samma färg på sidan.
+
+    Skalan går hela vägen ned till den sämsta placering någon av serierna når,
+    annars försvinner Ukrainas väg från plats 35 till 1 nedanför axeln.
+    """
+    ranks = wide.rank(axis=1, ascending=False, method="first")[panels]
+    x0, x1 = int(ranks.index.min()), int(ranks.index.max())
+    worst = int(ranks.max().max())
+
+    fig = go.Figure()
+    for c in panels:
+        fig.add_trace(go.Scatter(
+            x=ranks.index, y=ranks[c], name=c, mode="lines+markers",
+            line=dict(width=2, color=hues.get(c, t["muted"])),
+            marker=dict(size=6, color=hues.get(c, t["muted"])),
+            customdata=wide[c], showlegend=False,
+            hovertemplate="plats %{y:.0f} (%{customdata:,.0f})<extra>" + c + "</extra>"))
+        for x, anchor, shift in ((x0, "right", -10), (x1, "left", 10)):
+            fig.add_annotation(x=x, y=ranks[c][x], text=c, showarrow=False,
+                               xanchor=anchor, xshift=shift,
+                               font=dict(size=11.5, color=t["second"]))
+
+    # Namnen ritas innanför rutan, så x-axeln behöver tomrum i båda kanterna som
+    # rymmer den längsta etiketten. Mätt i år, eftersom skalan är år.
+    pad = 0.30 * (x1 - x0)
+    fig.update_layout(
+        title=dict(text="Plats på topplistan, år för år",
+                   x=0, xanchor="left", font=dict(size=17)),
+        yaxis=dict(title="Plats bland alla födelseländer", range=[worst + 1.5, 0.5],
+                   tickvals=[1, 5, 10, 15, 20, 25, 30, 35], gridcolor=t["grid"],
+                   linecolor=t["axis"], tickfont=dict(color=t["muted"])),
+        xaxis=dict(range=[x0 - pad, x1 + pad], tickvals=list(range(x0, x1 + 1, 5)),
+                   gridcolor=t["grid"], linecolor=t["axis"],
+                   tickfont=dict(color=t["muted"])),
+        height=760, margin=dict(t=70, l=76, r=28, b=52),
+        template="plotly_white", paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)", hovermode="closest")
+    return fig
+
+
 def table_html(wide: pd.DataFrame, panels: list[str]) -> str:
     """Tabellvyn. Riktlinjerna kräver en för varje diagram, och tre av färgerna
     i ljust läge ligger under 3:1 mot ytan, vilket gör den obligatorisk."""
@@ -318,9 +363,12 @@ def figures(df: pd.DataFrame):
     stacked = stacked[order + [OTHER_LABEL]]
 
     # Sidan ritas i ljusa färger och byter själv till de mörka stegen vid behov.
-    area = area_figure(stacked, THEME["light"])
-    panel = panels_figure(wide, panels, THEME["light"])
-    return area, panel, table_html(wide, panels), stacked, panels
+    light = THEME["light"]
+    hues = {c: light["series"][i % len(light["series"])] for i, c in enumerate(order)}
+    area = area_figure(stacked, light)
+    rank = rank_figure(wide, panels, hues, light)
+    panel = panels_figure(wide, panels, light)
+    return area, rank, panel, table_html(wide, panels), stacked, panels, order
 
 
 PAGE = """<!doctype html>
@@ -371,9 +419,11 @@ PAGE = """<!doctype html>
 <h1>Invandring till Sverige efter födelseland, {y0}–{y1}</h1>
 <p class="lead">Antal invandrade per år och födelseland enligt SCB:s statistikdatabas.
 Det övre diagrammet växlar mellan antal och andel. De {n_area} största serierna har egen
-färg där och resten summeras; varje enskilt land finns i stället som en egen panel längre
-ned, där färg inte behöver skilja något åt. Alla värden finns i tabellen.</p>
+färg där och resten summeras. I rangordningen står landsnamnen i kanterna, så den går att
+läsa utan färg, och längst ned finns varje land som en egen panel. Alla värden finns i
+tabellen.</p>
 <div class="chart">{area}</div>
+<div class="chart">{rank}</div>
 <div class="chart">{panels}</div>
 <details>
 <summary>Visa alla värden som tabell</summary>
@@ -397,33 +447,44 @@ födda i Sverige.</p>
   var DARK = {dark};
   var mq = window.matchMedia("(prefers-color-scheme: dark)");
 
+  // Texten i annotationerna sätts i Python med ljusa lägets bläck. Den som står i
+  // sekundärbläck ska byta med temat; toppvärdena står i muted, som är lika i båda.
+  var SECOND = ["#52514e", "#c3c2b7"];
+
   function apply() {{
-    var t = mq.matches ? DARK : LIGHT;
-    var plots = document.querySelectorAll(".js-plotly-plot");
-    plots.forEach(function (gd, i) {{
-      Plotly.relayout(gd, {{
+    var dark = mq.matches;
+    var t = dark ? DARK : LIGHT;
+    document.querySelectorAll(".js-plotly-plot").forEach(function (gd, i) {{
+      var lay = {{
         "font.color": t.ink, "title.font.color": t.ink, "legend.font.color": t.ink,
         "xaxis.title.font.color": t.second, "yaxis.title.font.color": t.second
-      }});
-      var ax = {{}};
+      }};
       Object.keys(gd.layout).forEach(function (k) {{
         if (/^[xy]axis\\d*$/.test(k)) {{
-          ax[k + ".gridcolor"] = t.grid;
-          ax[k + ".linecolor"] = t.axis;
-          ax[k + ".zerolinecolor"] = t.axis;
-          ax[k + ".tickfont.color"] = t.muted;
+          lay[k + ".gridcolor"] = t.grid;
+          lay[k + ".linecolor"] = t.axis;
+          lay[k + ".zerolinecolor"] = t.axis;
+          lay[k + ".tickfont.color"] = t.muted;
         }}
       }});
-      Plotly.relayout(gd, ax);
+      (gd.layout.annotations || []).forEach(function (a, j) {{
+        var c = a.font && a.font.color;
+        if (SECOND.indexOf(c) !== -1) lay["annotations[" + j + "].font.color"] = t.second;
+      }});
+      Plotly.relayout(gd, lay);
+
       if (i === 0) {{
         Plotly.restyle(gd, {{
-          "fillcolor": (mq.matches ? SWAP.area.dark : SWAP.area.light),
+          "fillcolor": (dark ? SWAP.area.dark : SWAP.area.light),
           "line.color": t.surface
         }});
+      }} else if (i === 1) {{
+        var hues = dark ? SWAP.rank.dark : SWAP.rank.light;
+        Plotly.restyle(gd, {{"line.color": hues, "marker.color": hues}});
       }} else {{
         Plotly.restyle(gd, {{
-          "line.color": (mq.matches ? SWAP.panels.dark.line : SWAP.panels.light.line),
-          "fillcolor": (mq.matches ? SWAP.panels.dark.fill : SWAP.panels.light.fill)
+          "line.color": (dark ? SWAP.panels.dark.line : SWAP.panels.light.line),
+          "fillcolor": (dark ? SWAP.panels.dark.fill : SWAP.panels.light.fill)
         }});
       }}
     }});
@@ -440,7 +501,7 @@ REPO = "oluies/se-immigration"
 
 
 def build(df: pd.DataFrame) -> None:
-    area, panel, table, stacked, panels = figures(df)
+    area, rank, panel, table, stacked, panels, order = figures(df)
     y0, y1 = int(stacked.index.min()), int(stacked.index.max())
     light, dark = THEME["light"], THEME["dark"]
 
@@ -448,8 +509,13 @@ def build(df: pd.DataFrame) -> None:
         return [rgba(t["other"] if c == OTHER_LABEL else t["series"][i % len(t["series"])], 0.95)
                 for i, c in enumerate(stacked.columns)]
 
+    def rank_hues(t: dict) -> list[str]:
+        hues = {c: t["series"][i % len(t["series"])] for i, c in enumerate(order)}
+        return [hues.get(c, t["muted"]) for c in panels]
+
     swap = {
         "area": {"light": fills(light), "dark": fills(dark)},
+        "rank": {"light": rank_hues(light), "dark": rank_hues(dark)},
         "panels": {
             "light": {"line": light["series"][0], "fill": rgba(light["series"][0], 0.10)},
             "dark": {"line": dark["series"][0], "fill": rgba(dark["series"][0], 0.10)},
@@ -464,6 +530,8 @@ def build(df: pd.DataFrame) -> None:
         swap=json.dumps(swap, ensure_ascii=False),
         light=json.dumps(tokens["light"]), dark=json.dumps(tokens["dark"]),
         area=area.to_html(full_html=False, include_plotlyjs="cdn",
+                          config={"displaylogo": False, "responsive": True}),
+        rank=rank.to_html(full_html=False, include_plotlyjs=False,
                           config={"displaylogo": False, "responsive": True}),
         panels=panel.to_html(full_html=False, include_plotlyjs=False,
                              config={"displaylogo": False, "responsive": True}),

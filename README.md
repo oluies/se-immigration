@@ -12,6 +12,9 @@ Tre vyer över perioden 2005–2025:
 - **Staplad yta** med alla invandrade per år, uppdelade på födelseland. En knapp växlar
   mellan antal och andel, vilket gör förskjutningarna tydliga: Irak i mitten av 00-talet,
   Syrien 2015–2016 och Ukraina 2024. Sju serier har egen färg, resten summeras som "Övriga".
+- **Rangordning per år** bland samtliga födelseländer. Landsnamnen står utsatta i båda
+  kanterna i stället för i en färgförklaring, så diagrammet går att läsa utan färg.
+  Skalan går ned till plats 35, annars försvinner Ukrainas väg från 35 till 1 under axeln.
 - **Småmultiplar**, ett litet linjediagram per land med egen y-skala, så att Syrien 2016
   inte trycker ihop allt annat. Toppvärdet skrivs ut i varje panel.
 - **Tabellvy** med alla värden, utfällbar under diagrammen.
@@ -19,8 +22,13 @@ Tre vyer över perioden 2005–2025:
 ## Färg och färgseende
 
 Ytdiagrammet bär sju färger. Fler färgklasser än så går inte att skilja åt med nedsatt
-färgseende, oavsett palett, så de övriga länderna får varsin panel i småmultiplarna i
-stället, där alla paneler har samma färg och färg därmed inte behöver särskilja någonting.
+färgseende, oavsett palett. De övriga länderna får därför varsin panel i småmultiplarna,
+där alla paneler har samma färg, och i rangordningen bärs identiteten av utsatta namn
+i stället för av färg.
+
+Ett land har alltid samma färg på hela sidan. De sju som har egen färg i ytdiagrammet
+behåller den i rangordningen; de övriga sex ritas neutralt grå. Grått betyder alltså
+"finns inte som egen yta i det övre diagrammet", inte "saknar betydelse".
 
 Paletten är hämtad ur dataviz-riktlinjerna och kontrollerad med deras validator, separat
 för ljus och mörk yta:
