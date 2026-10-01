@@ -58,7 +58,16 @@ T = dict(surface="#fcfcfb", page="#f9f9f7", ink="#0b0b0b", second="#52514e",
          series=SERIES, other="#cfcec6")
 
 DB = Path("data/immigration.duckdb")
+REGION_CSV = Path("data/regions.csv")
 OUT = Path("docs/index.html")
+
+# Län och SCB:s egna födelseregioner ligger i andra tabeller än födelselandet.
+COUNTY_TABLE = "FlyttFodReg"      # utrikes inflyttningar per län, 2002-2024
+COUNTY_CONTENTS = "000001EB"      # "Utrikes inflyttningar"
+REGION_TABLE = "ImmiCKM"          # invandringar per län och födelseland, 2025
+# SCB:s födelseregioner som tillsammans täcker alla invandrade utan överlapp.
+# "okänt födelseland" utelämnas: det är samma personer som "okänd födelseregion".
+SCB_REGIONS = ["010", "NEXS", "EUexNord", "EurExEUNor", "AFR", "ASI", "NSAOS", "OFR"]
 
 # EU-27 enligt dagens medlemskap, tillämpat på alla år. Storbritannien ingår inte
 # och redovisas separat, vilket gör att utträdet 2020 inte bryter serien.
@@ -82,6 +91,77 @@ TOTAL_PREFIXES = ("totalt", "samtliga")
 
 def is_total(text: str) -> bool:
     return text.strip().lower().startswith(TOTAL_PREFIXES)
+
+
+def post(table: str, query: list[dict]) -> pd.DataFrame:
+    """Kör en fråga mot en tabell och returnerar dimensionerna plus value."""
+    resp = requests.post(f"{BASE}/{table}",
+                         json={"query": query, "response": {"format": "json"}}, timeout=180)
+    resp.raise_for_status()
+    body = resp.json()
+    dims = [c["code"] for c in body["columns"] if c["type"] != "c"]
+    rows = [dict(zip(dims, d["key"]), value=d["values"][0]) for d in body["data"]]
+    df = pd.DataFrame(rows)
+    df["value"] = pd.to_numeric(df["value"], errors="coerce").fillna(0)
+    return df
+
+
+def values_of(table: str, var: str) -> dict[str, str]:
+    meta = requests.get(f"{BASE}/{table}", timeout=30).json()
+    v = next(x for x in meta["variables"] if x["code"] == var)
+    return dict(zip(v["values"], v["valueTexts"]))
+
+
+def fetch_counties() -> pd.DataFrame:
+    """Utrikes inflyttningar per län. 2005-2024 ur FlyttFodReg, 2025 ur ImmiCKM.
+
+    FlyttFodReg delar upp på född i Sverige och utrikes född; båda summeras,
+    eftersom serien ska motsvara samtliga invandrade precis som resten av sidan.
+    Åldersdimensionen har ett förräknat totalvärde, så frågan blir liten.
+    """
+    labels = values_of(COUNTY_TABLE, "Region")
+    lan = [c for c in labels if len(c) == 2 and c != "00"]
+    years = [str(y) for y in range(START_YEAR, 2025)]
+
+    old = post(COUNTY_TABLE, [
+        {"code": "Region", "selection": {"filter": "item", "values": lan}},
+        {"code": "Alder", "selection": {"filter": "item", "values": ["tot"]}},
+        {"code": "Kon", "selection": {"filter": "item", "values": ["1", "2"]}},
+        {"code": "Fodelseregion", "selection": {"filter": "item", "values": ["09", "11"]}},
+        {"code": "ContentsCode", "selection": {"filter": "item", "values": [COUNTY_CONTENTS]}},
+        {"code": "Tid", "selection": {"filter": "item", "values": years}},
+    ])
+    old["source"] = COUNTY_TABLE
+
+    new_labels = values_of(REGION_TABLE, "Region")
+    new_lan = [c for c in new_labels if len(c) == 2 and c != "00"]
+    new = post(REGION_TABLE, [
+        {"code": "Region", "selection": {"filter": "item", "values": new_lan}},
+        {"code": "Fodelseland", "selection": {"filter": "item", "values": ["TOT"]}},
+        {"code": "Kon", "selection": {"filter": "item", "values": ["TotSa"]}},
+        {"code": "Tid", "selection": {"filter": "item", "values": ["2025"]}},
+    ])
+    new["source"] = REGION_TABLE
+    labels.update(new_labels)
+
+    df = pd.concat([old, new], ignore_index=True)
+    df["year"] = df["Tid"].astype(int)
+    df["county"] = df["Region"].map(labels)
+    return df.groupby(["year", "county", "source"], as_index=False)["value"].sum()
+
+
+def fetch_birth_regions() -> pd.DataFrame:
+    """SCB:s egen indelning i födelseregioner. Finns bara för 2025."""
+    labels = values_of(REGION_TABLE, "Fodelseland")
+    df = post(REGION_TABLE, [
+        {"code": "Region", "selection": {"filter": "item", "values": ["00"]}},
+        {"code": "Fodelseland", "selection": {"filter": "item", "values": SCB_REGIONS}},
+        {"code": "Kon", "selection": {"filter": "item", "values": ["TotSa"]}},
+        {"code": "Tid", "selection": {"filter": "item", "values": ["2025"]}},
+    ])
+    df["year"] = df["Tid"].astype(int)
+    df["region"] = df["Fodelseland"].map(labels)
+    return df.groupby(["year", "region"], as_index=False)["value"].sum()
 
 
 def fetch_table(table: str) -> pd.DataFrame:
@@ -119,8 +199,9 @@ def fetch_table(table: str) -> pd.DataFrame:
     time_col = next(c["code"] for c in body["columns"] if c["type"] == "t")
     df["value"] = pd.to_numeric(df["value"], errors="coerce").fillna(0)
     df["year"] = df[time_col].astype(int)
+    df["code"] = df[country_var]
     df["country"] = df[country_var].map(labels)
-    out = df.groupby(["year", "country"], as_index=False)["value"].sum()
+    out = df.groupby(["year", "code", "country"], as_index=False)["value"].sum()
     out["source"] = table
     return out
 
@@ -130,20 +211,45 @@ def refresh(con: duckdb.DuckDBPyConnection) -> None:
     parts = [fetch_table(t) for t in TABLES]
     raw = pd.concat([p for p in parts if not p.empty], ignore_index=True)
     # Samma år ska inte kunna komma från två tabeller.
-    raw = raw.sort_values("source").drop_duplicates(["year", "country"], keep="first")
+    raw = raw.sort_values("source").drop_duplicates(["year", "code"], keep="first")
     con.register("raw", raw)
     con.execute("""
         CREATE OR REPLACE TABLE immigration AS
-        SELECT CAST(year AS INTEGER)  AS year,
+        SELECT CAST(year AS INTEGER)   AS year,
+               CAST(code AS VARCHAR)    AS code,
                CAST(country AS VARCHAR) AS country,
-               CAST(value AS BIGINT)  AS value,
-               CAST(source AS VARCHAR) AS source
+               CAST(value AS BIGINT)    AS value,
+               CAST(source AS VARCHAR)  AS source
         FROM raw
         ORDER BY year, country
     """)
     con.unregister("raw")
+    con.register("counties", fetch_counties())
+    con.execute("""
+        CREATE OR REPLACE TABLE county AS
+        SELECT CAST(year AS INTEGER) AS year, CAST(county AS VARCHAR) AS county,
+               CAST(value AS BIGINT) AS value, CAST(source AS VARCHAR) AS source
+        FROM counties ORDER BY year, county
+    """)
+    con.unregister("counties")
+
+    con.register("bregions", fetch_birth_regions())
+    con.execute("""
+        CREATE OR REPLACE TABLE birth_region AS
+        SELECT CAST(year AS INTEGER) AS year, CAST(region AS VARCHAR) AS region,
+               CAST(value AS BIGINT) AS value
+        FROM bregions ORDER BY value DESC
+    """)
+    con.unregister("bregions")
+
+    # Världsdelsmappningen är vår egen och ligger som granskbar fil i repot.
+    con.execute("CREATE OR REPLACE TABLE region_map AS SELECT * FROM read_csv_auto(?)",
+                [str(REGION_CSV)])
+
     n, y0, y1 = con.execute("SELECT count(*), min(year), max(year) FROM immigration").fetchone()
-    print(f"Hämtade {n} rader från SCB, {y0}–{y1}")
+    nc = con.execute("SELECT count(*) FROM county").fetchone()[0]
+    nb = con.execute("SELECT count(*) FROM birth_region").fetchone()[0]
+    print(f"Hämtade {n} rader födelseland {y0}–{y1}, {nc} rader län, {nb} födelseregioner")
 
 
 def load(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
@@ -169,6 +275,23 @@ def load(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
         ORDER BY 1, 2
     """, {"include_sweden": INCLUDE_SWEDEN, "group_eu": GROUP_EU,
           "eu": eu, "eu_label": EU_LABEL}).df()
+
+
+def load_continents(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+    """Invandrade per världsdel och år, enligt mappningen i data/regions.csv."""
+    return con.execute("""
+        SELECT i.year, r.region, sum(i.value) AS value
+        FROM immigration i JOIN region_map r ON r.code = i.code
+        GROUP BY 1, 2 ORDER BY 1, 2
+    """).df()
+
+
+def load_counties(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+    return con.execute("SELECT year, county, value FROM county ORDER BY 1, 2").df()
+
+
+def load_birth_regions(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+    return con.execute("SELECT year, region, value FROM birth_region ORDER BY value DESC").df()
 
 
 # --------------------------------------------------------------------------- #
@@ -222,42 +345,50 @@ def area_figure(stacked: pd.DataFrame, t: dict) -> go.Figure:
             line=dict(width=2, color=t["surface"]), fillcolor=rgba(hue, 0.95),
             hovertemplate="%{y:,.0f}<extra>" + c + "</extra>"))
     fig.update_layout(
-        title=dict(text="Alla invandrade per år, uppdelade på födelseland",
-                   x=0, xanchor="left", y=0.97, yanchor="top", font=dict(size=17)),
         yaxis_title="Antal invandrade", hovermode="x unified", template="plotly_white",
         hoverlabel=dict(bgcolor="#ffffff", bordercolor=t["axis"],
                         font=dict(color=t["ink"], size=12)),
         font=dict(color=t["ink"]),
-        height=560, margin=dict(t=120, l=72, r=24, b=56),
+        height=520, margin=dict(t=64, l=72, r=24, b=56),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         legend=dict(traceorder="reversed", font=dict(size=12)),
         # Knapparna behåller fasta färger, annars blir texten oläslig när sidan
         # växlar till mörkt läge och den globala textfärgen blir ljus.
         updatemenus=[dict(type="buttons", direction="right", x=0, xanchor="left",
-                          y=1.07, yanchor="bottom", bgcolor="#ffffff",
+                          y=1.02, yanchor="bottom", bgcolor="#ffffff",
                           bordercolor="#c3c2b7", font=dict(color="#0b0b0b", size=12), buttons=[
             dict(label="Antal", method="update",
                  args=[{"groupnorm": ""}, {"yaxis.title.text": "Antal invandrade"}]),
             dict(label="Andel (%)", method="update",
                  args=[{"groupnorm": "percent"}, {"yaxis.title.text": "Andel av invandrade, %"}]),
         ])])
-    fig.update_xaxes(gridcolor=t["grid"], linecolor=t["axis"], tickfont=dict(color=t["muted"]))
-    fig.update_yaxes(gridcolor=t["grid"], linecolor=t["axis"], tickfont=dict(color=t["muted"]))
+    # Utan standoff hamnar första årtalet ovanpå y-axelns nolla i hörnet.
+    fig.update_xaxes(gridcolor=t["grid"], linecolor=t["axis"], ticklabelstandoff=8,
+                     tickfont=dict(color=t["muted"]))
+    fig.update_yaxes(gridcolor=t["grid"], linecolor=t["axis"],
+                     tickfont=dict(color=t["muted"]))
     return fig
 
 
-def panels_figure(wide: pd.DataFrame, panels: list[str], t: dict) -> go.Figure:
-    """Ett litet linjediagram per land, alla i samma färg.
+def panels_figure(wide: pd.DataFrame, panels: list[str], title: str, t: dict,
+                  cols: int = PANEL_COLS) -> go.Figure:
+    """Ett litet linjediagram per serie, alla i samma färg.
 
     Varje panel har egen y-skala, annars dränker Syrien 2016 allt annat. Toppens
     värde skrivs ut i panelen, så att skalorna går att jämföra ändå.
     """
-    rows = -(-len(panels) // PANEL_COLS)
-    fig = make_subplots(rows=rows, cols=PANEL_COLS, subplot_titles=panels,
-                        vertical_spacing=0.10, horizontal_spacing=0.055)
+    rows = -(-len(panels) // cols)
+    height = 190 * rows + 54
+    # Plotlys vertical_spacing är en andel av rutnätets höjd, så ett fast tal ger
+    # för tätt mellan raderna när panelerna är få: rubriken i nästa rad hamnar
+    # ovanpå årsetiketterna i raden ovanför. Räkna fram andelen ur en pixelgap.
+    grid_h = height - 44 - 24
+    vspace = min(46 / grid_h, 0.9 / max(rows - 1, 1))
+    fig = make_subplots(rows=rows, cols=cols, subplot_titles=panels,
+                        vertical_spacing=vspace, horizontal_spacing=0.055)
     hue = t["series"][0]
     for i, c in enumerate(panels):
-        r, col = divmod(i, PANEL_COLS)
+        r, col = divmod(i, cols)
         r, col = r + 1, col + 1
         y = wide[c]
         fig.add_trace(go.Scatter(
@@ -276,9 +407,7 @@ def panels_figure(wide: pd.DataFrame, panels: list[str], t: dict) -> go.Figure:
     for a in fig.layout.annotations[:len(panels)]:
         a.font = dict(size=12, color=t["second"])
     fig.update_layout(
-        title=dict(text="Varje land för sig, med egen skala",
-                   x=0, xanchor="left", font=dict(size=17)),
-        height=170 * rows + 90, margin=dict(t=90, l=24, r=24, b=24),
+        height=height, margin=dict(t=44, l=24, r=24, b=24),
         template="plotly_white", paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)", hovermode="x",
         font=dict(color=t["ink"]),
@@ -319,21 +448,63 @@ def rank_figure(wide: pd.DataFrame, panels: list[str], hues: dict[str, str], t: 
     # rymmer den längsta etiketten. Mätt i år, eftersom skalan är år.
     pad = 0.30 * (x1 - x0)
     fig.update_layout(
-        title=dict(text="Plats på topplistan, år för år",
-                   x=0, xanchor="left", font=dict(size=17)),
         yaxis=dict(title="Plats bland alla födelseländer", range=[worst + 1.5, 0.5],
                    tickvals=[1, 5, 10, 15, 20, 25, 30, 35], gridcolor=t["grid"],
                    linecolor=t["axis"], tickfont=dict(color=t["muted"])),
         xaxis=dict(range=[x0 - pad, x1 + pad], tickvals=list(range(x0, x1 + 1, 5)),
                    gridcolor=t["grid"], linecolor=t["axis"],
                    tickfont=dict(color=t["muted"])),
-        height=760, margin=dict(t=70, l=76, r=28, b=52),
+        height=730, margin=dict(t=24, l=76, r=28, b=52),
         template="plotly_white", paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)", hovermode="closest",
         font=dict(color=t["ink"]),
         hoverlabel=dict(bgcolor="#ffffff", bordercolor=t["axis"],
                         font=dict(color=t["ink"], size=12)))
     return fig
+
+
+def region_bar_figure(br: pd.DataFrame, t: dict) -> go.Figure:
+    """SCB:s egna födelseregioner. Bara ett år finns publicerat så här, så det
+    blir liggande staplar med utsatta värden i stället för en tidsserie."""
+    br = br.sort_values("value").copy()
+    year = int(br["year"].iloc[0])
+    br["label"] = br["region"].str.replace("Nord- och Sydamerika, ",
+                                           "Nord- och Sydamerika,<br>", regex=False)
+    fig = go.Figure(go.Bar(
+        x=br["value"], y=br["label"], orientation="h",
+        marker=dict(color=t["series"][0]),
+        text=[fmt(v) for v in br["value"]], textposition="outside",
+        textfont=dict(color=t["second"], size=12),
+        customdata=br["region"],
+        hovertemplate="<b>%{customdata}</b><br>%{x:,.0f} invandrade<extra></extra>"))
+    fig.update_layout(
+        height=330, margin=dict(t=20, l=16, r=40, b=50),
+        template="plotly_white", paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)", font=dict(color=t["ink"]),
+        bargap=0.45,
+        # Värdet skrivs utanför stapeln, så skalan måste rymma det. Utan det här
+        # klipps etiketten på den längsta stapeln av vid diagrammets högerkant.
+        xaxis=dict(title="Antal invandrade", range=[0, br["value"].max() * 1.16],
+                   gridcolor=t["grid"], linecolor=t["axis"],
+                   tickfont=dict(color=t["muted"])),
+        yaxis=dict(linecolor=t["axis"], automargin=True,
+                   tickfont=dict(color=t["ink"], size=12)),
+        hoverlabel=dict(bgcolor="#ffffff", bordercolor=t["axis"],
+                        font=dict(color=t["ink"], size=12)))
+    return fig
+
+
+def simple_table(wide: pd.DataFrame, cols: list[str], caption: str) -> str:
+    out = wide[cols].copy()
+    out["Totalt"] = wide.sum(axis=1)
+    head = "".join(f"<th scope='col'>{c}</th>" for c in out.columns)
+    body = "".join(
+        f"<tr><th scope='row'>{y}</th>"
+        + "".join(f"<td>{fmt(out.loc[y, c])}</td>" for c in out.columns)
+        + "</tr>" for y in out.index)
+    return (f"<table><caption>{caption}</caption>"
+            f"<thead><tr><th scope='col'>År</th>{head}</tr></thead>"
+            f"<tbody>{body}</tbody></table>")
 
 
 def table_html(wide: pd.DataFrame, panels: list[str]) -> str:
@@ -354,7 +525,7 @@ def table_html(wide: pd.DataFrame, panels: list[str]) -> str:
             f"<tbody>{body}</tbody></table>")
 
 
-def figures(df: pd.DataFrame):
+def figures(df: pd.DataFrame, cont: pd.DataFrame, cty: pd.DataFrame, br: pd.DataFrame):
     wide = df.pivot_table(index="year", columns="country", values="value", aggfunc="sum").fillna(0)
 
     area_series = select(wide, AREA_N)
@@ -367,10 +538,28 @@ def figures(df: pd.DataFrame):
     stacked = stacked[order + [OTHER_LABEL]]
 
     hues = {c: T["series"][i % len(T["series"])] for i, c in enumerate(order)}
-    area = area_figure(stacked, T)
-    rank = rank_figure(wide, panels, hues, T)
-    panel = panels_figure(wide, panels, T)
-    return area, rank, panel, table_html(wide, panels), stacked, panels
+
+    cw = cont.pivot_table(index="year", columns="region", values="value", aggfunc="sum").fillna(0)
+    cw = cw[cw.sum().sort_values(ascending=False).index]
+    yw = cty.pivot_table(index="year", columns="county", values="value", aggfunc="sum").fillna(0)
+    yw = yw[yw.sum().sort_values(ascending=False).index]
+
+    figs = dict(
+        area=area_figure(stacked, T),
+        rank=rank_figure(wide, panels, hues, T),
+        panels=panels_figure(wide, panels, "Varje land för sig, med egen skala", T),
+        continents=panels_figure(cw, list(cw.columns),
+                                 "Varje världsdel för sig, med egen skala", T),
+        counties=panels_figure(yw, list(yw.columns),
+                               "Varje län för sig, med egen skala", T),
+        regionbar=region_bar_figure(br, T),
+    )
+    tables = dict(
+        countries=table_html(wide, panels),
+        continents=simple_table(cw, list(cw.columns), "Invandrade per år och världsdel"),
+        counties=simple_table(yw, list(yw.columns), "Invandrade per år och län"),
+    )
+    return figs, tables, stacked, panels
 
 
 PAGE = """<!doctype html>
@@ -390,9 +579,19 @@ PAGE = """<!doctype html>
   body {{ margin:0 auto; padding:2.5rem 16px 4rem; max-width:1140px; background:var(--page);
          color:var(--ink); font:16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }}
   h1 {{ font-size:1.75rem; line-height:1.25; margin:0 0 .5rem; letter-spacing:-.01em; }}
+  h2 {{ font-size:1.25rem; margin:3rem 0 .4rem; padding-top:1.25rem;
+       border-top:1px solid var(--rule); letter-spacing:-.01em; }}
   p.lead {{ color:var(--second); margin:0 0 2.25rem; max-width:68ch; }}
+  p.note {{ color:var(--second); margin:0 0 1.25rem; max-width:68ch; font-size:.92rem; }}
+  nav {{ margin:0 0 2.5rem; font-size:.92rem; }}
+  nav a {{ color:var(--second); margin-right:1.25rem; }}
   .chart {{ background:var(--surface); border:1px solid var(--rule); border-radius:10px;
-           padding:.75rem .5rem; margin:0 0 1.75rem; }}
+           padding:.9rem .75rem; margin:0 0 1.75rem; }}
+  .chart h3 {{ font-size:1rem; font-weight:600; margin:.1rem 0 .6rem; }}
+  /* Rangordningen och småmultiplarna är breda av naturen. Hellre svepa i sidled
+     än att klippa namnen på en telefon. */
+  .chart.wide > .inner {{ overflow-x:auto; }}
+  .chart.wide .plot {{ min-width:720px; }}
   details {{ margin:0 0 2.5rem; }}
   summary {{ cursor:pointer; color:var(--second); padding:.5rem 0; }}
   .scroll {{ overflow-x:auto; }}
@@ -415,18 +614,58 @@ PAGE = """<!doctype html>
 <p class="lead">Antal invandrade per år och födelseland enligt SCB:s statistikdatabas.
 Det övre diagrammet växlar mellan antal och andel. De {n_area} största serierna har egen
 färg där och resten summeras. I rangordningen står landsnamnen i kanterna, så den går att
-läsa utan färg, och längst ned finns varje land som en egen panel. Alla värden finns i
-tabellen.</p>
-<div class="chart">{area}</div>
-<div class="chart">{rank}</div>
-<div class="chart">{panels}</div>
+läsa utan färg, och längre ned finns varje land som en egen panel. Sidan visar samma
+invandring på fyra sätt: efter födelseland, efter världsdel, efter SCB:s egen
+regionindelning och efter län. Alla värden finns som tabeller.</p>
+<nav>
+<a href="#land">Födelseland</a><a href="#varldsdel">Världsdel</a>
+<a href="#scb">SCB:s födelseregioner</a><a href="#lan">Län</a>
+</nav>
+
+<h2 id="land">Efter födelseland</h2>
+<div class="chart wide"><h3>Alla invandrade per år, uppdelade på födelseland</h3>
+<div class="inner"><div class="plot">{area}</div></div></div>
+<div class="chart wide"><h3>Plats på topplistan, år för år</h3><div class="inner"><div class="plot">{rank}</div></div></div>
+<div class="chart wide"><h3>Varje land för sig, med egen skala</h3><div class="inner"><div class="plot">{panels}</div></div></div>
 <details>
 <summary>Visa alla värden som tabell</summary>
 <div class="scroll">{table}</div>
 </details>
+
+<h2 id="varldsdel">Efter världsdel</h2>
+<p class="note">SCB:s tabell innehåller bara enskilda länder, inga regionaggregat. Länderna
+är därför grupperade till världsdel efter sin landkod, med mappningen i
+<a href="https://github.com/{repo}/blob/main/data/regions.csv">data/regions.csv</a>.
+Historiska stater är placerade där merparten av området ligger; Sovjetunionen räknas som
+Europa. Det här är inte samma indelning som SCB:s egen längre ned.</p>
+<div class="chart wide"><h3>Varje världsdel för sig, med egen skala</h3><div class="inner"><div class="plot">{continents}</div></div></div>
+<details>
+<summary>Visa alla värden som tabell</summary>
+<div class="scroll">{table_continents}</div>
+</details>
+
+<h2 id="scb">SCB:s egen indelning i födelseregioner</h2>
+<p class="note">SCB publicerar en egen regionindelning, men bara i tabellen ImmiCKM som
+hittills bara omfattar {region_year}. Det blir därför en ögonblicksbild och ingen tidsserie.
+Indelningen skiljer sig från världsdelarna ovan: Turkiet räknas här till Europa utom EU och
+Norden, och Sovjetunionen ligger i samma grupp som Nord- och Sydamerika och Oceanien.</p>
+<div class="chart"><h3>SCB:s egen indelning i födelseregioner, {region_year}</h3>{regionbar}</div>
+
+<h2 id="lan">Efter län</h2>
+<p class="note">Var de invandrade folkbokfördes, för alla {n_counties} län. Det här är en
+annan dimension än resten av sidan och kommer ur en annan tabell: FlyttFodReg redovisar
+utrikes inflyttningar per län men delar inte upp dem på födelseland, så serierna kan inte
+kombineras med länderna ovan. Årssummorna stämmer ändå exakt mot födelselandstabellen till
+och med 2024.</p>
+<div class="chart wide"><h3>Varje län för sig, med egen skala</h3><div class="inner"><div class="plot">{counties}</div></div></div>
+<details>
+<summary>Visa alla värden som tabell</summary>
+<div class="scroll">{table_counties}</div>
+</details>
+
 <footer>
-<p>Källa: SCB, Statistikdatabasen, Invandrare och utvandrare efter födelseland och kön
-(tabellerna ImmiEmiFod och ImmiEmiFodCKM). Uppgifterna för {y1} redovisas med kontrollerad
+<p>Källa: SCB, Statistikdatabasen: ImmiEmiFod och ImmiEmiFodCKM (födelseland),
+FlyttFodReg och ImmiCKM (län och födelseregioner). Uppgifterna för {y1} redovisas med kontrollerad
 slumpmässig avrundning, vilket gör att små tal är något osäkra och att delarna inte summerar
 exakt till totalen. EU avser dagens 27 medlemsländer utom Sverige, tillämpat på alla år;
 Storbritannien redovisas separat för hela perioden. Serien Sverige är återinvandrade personer
@@ -440,21 +679,27 @@ födda i Sverige.</p>
 REPO = "oluies/se-immigration"
 
 
-def build(df: pd.DataFrame) -> None:
-    area, rank, panel, table, stacked, panels = figures(df)
+CONF = {"displaylogo": False, "responsive": True}
+
+
+def build(df: pd.DataFrame, cont: pd.DataFrame, cty: pd.DataFrame,
+          br: pd.DataFrame) -> None:
+    figs, tables, stacked, panels = figures(df, cont, cty, br)
     y0, y1 = int(stacked.index.min()), int(stacked.index.max())
+
+    html = {k: f.to_html(full_html=False, config=CONF,
+                         include_plotlyjs="cdn" if k == "area" else False)
+            for k, f in figs.items()}
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(PAGE.format(
-        y0=y0, y1=y1, n_area=AREA_N, repo=REPO, table=table,
-        area=area.to_html(full_html=False, include_plotlyjs="cdn",
-                          config={"displaylogo": False, "responsive": True}),
-        rank=rank.to_html(full_html=False, include_plotlyjs=False,
-                          config={"displaylogo": False, "responsive": True}),
-        panels=panel.to_html(full_html=False, include_plotlyjs=False,
-                             config={"displaylogo": False, "responsive": True}),
+        y0=y0, y1=y1, n_area=AREA_N, repo=REPO,
+        n_counties=len(cty["county"].unique()), region_year=int(br["year"].iloc[0]),
+        table=tables["countries"], table_continents=tables["continents"],
+        table_counties=tables["counties"], **html,
     ), encoding="utf-8")
-    print(f"Skrev {OUT} ({y1 - y0 + 1} år, {AREA_N} färgade ytor, {len(panels)} paneler)")
+    print(f"Skrev {OUT} ({y1 - y0 + 1} år, {len(panels)} länder, "
+          f"{len(cont['region'].unique())} världsdelar, {len(cty['county'].unique())} län)")
 
 
 def main() -> None:
@@ -470,7 +715,7 @@ def main() -> None:
         ).fetchone()[0]
         if args.refresh or not exists:
             refresh(con)
-        build(load(con))
+        build(load(con), load_continents(con), load_counties(con), load_birth_regions(con))
 
 
 if __name__ == "__main__":

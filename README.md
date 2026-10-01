@@ -19,6 +19,12 @@ Tre vyer över perioden 2005–2025:
   inte trycker ihop allt annat. Toppvärdet skrivs ut i varje panel.
 - **Tabellvy** med alla värden, utfällbar under diagrammen.
 
+Samma invandring visas sedan på tre andra sätt:
+
+- **Efter världsdel**, en panel per världsdel över hela perioden.
+- **Efter SCB:s egen regionindelning**, som liggande staplar. Den finns bara för 2025.
+- **Efter län**, en panel för vart och ett av de 21 länen — var de invandrade folkbokfördes.
+
 ## Färg och färgseende
 
 Ytdiagrammet bär sju färger. Fler färgklasser än så går inte att skilja åt med nedsatt
@@ -55,10 +61,12 @@ färgerna ligger under 3:1 mot vitt.
 
 ## Datakällor
 
-| Tabell | År | Kommentar |
+| Tabell | År | Används till |
 |---|---|---|
-| [`ImmiEmiFod`](https://www.statistikdatabasen.scb.se/pxweb/sv/ssd/START__BE__BE0101__BE0101J/ImmiEmiFod/) | 2000–2024 | |
-| [`ImmiEmiFodCKM`](https://www.statistikdatabasen.scb.se/pxweb/sv/ssd/START__BE__BE0101__BE0101J/ImmiEmiFodCKM/) | 2025 | Kontrollerad slumpmässig avrundning |
+| [`ImmiEmiFod`](https://www.statistikdatabasen.scb.se/pxweb/sv/ssd/START__BE__BE0101__BE0101J/ImmiEmiFod/) | 2000–2024 | Födelseland |
+| [`ImmiEmiFodCKM`](https://www.statistikdatabasen.scb.se/pxweb/sv/ssd/START__BE__BE0101__BE0101J/ImmiEmiFodCKM/) | 2025 | Födelseland, med kontrollerad slumpmässig avrundning |
+| [`FlyttFodReg`](https://www.statistikdatabasen.scb.se/pxweb/sv/ssd/START__BE__BE0101__BE0101J/FlyttFodReg/) | 2002–2024 | Län, via tabellinnehållet "Utrikes inflyttningar" |
+| [`ImmiCKM`](https://www.statistikdatabasen.scb.se/pxweb/sv/ssd/START__BE__BE0101__BE0101J/ImmiCKM/) | 2025 | Län, och SCB:s egna födelseregioner |
 
 Två saker är värda att känna till om underlaget:
 
@@ -68,6 +76,31 @@ Två saker är värda att känna till om underlaget:
 - CKM-tabellen har ett **förräknat totalvärde i könsdimensionen** (`TotSa`) som den äldre
   tabellen saknar. Den som summerar över alla könsvärden dubbelräknar 2025. Skriptet väljer
   totalvärdet när det finns.
+
+## De tre regionindelningarna
+
+De skiljer sig åt, och det är avsiktligt redovisat på sidan.
+
+**Världsdel** är vår egen gruppering. SCB:s födelselandstabell innehåller bara enskilda
+länder, inga regionaggregat, så de 208 länderna är mappade efter sin landkod — som följer
+ISO 3166-1 alpha-2 — till mappningen i [`data/regions.csv`](data/regions.csv). Åtta koder
+saknas i ISO eller avser historiska stater och är satta för hand: Gaza-området och Östtimor
+till Asien, Vatikanen, Jugoslavien, Serbien och Montenegro samt Tjeckoslovakien till Europa,
+okänt födelseland till en egen grupp. Sovjetunionen spände över två världsdelar och räknas
+här som Europa; det gäller 1 397 personer av 2,27 miljoner över hela perioden.
+
+**SCB:s egen födelseregion** finns bara i `ImmiCKM`, som hittills bara omfattar 2025. Den
+är inte samma indelning: Turkiet räknas dit till Europa utom EU och Norden medan vår
+mappning lägger det i Asien, och Sovjetunionen ligger i samma grupp som Nord- och
+Sydamerika och Oceanien. Av SCB:s åtta grupper används alla utom *okänt födelseland*, som
+är samma personer som *okänd födelseregion* — tas båda med dubbelräknas nio personer.
+
+**Län** är en annan dimension än resten av sidan. `FlyttFodReg` redovisar utrikes
+inflyttningar per län men delar bara upp dem på född i Sverige eller utrikes född, inte på
+födelseland, så serierna kan inte kombineras med länderna. Att de ändå mäter samma sak
+syns på att årssummorna stämmer exakt mot födelselandstabellen till och med 2024
+(163 005 år 2016, 82 518 år 2020, 116 197 år 2024). För 2025 skiljer de sig med 8 personer,
+vilket är CKM-avrundningen.
 
 ## Grupperingar
 
@@ -84,6 +117,15 @@ uv run invandring_fodelseland.py             # bygger om sidan från DuckDB-file
 
 Data lagras i `data/immigration.duckdb` och sidan skrivs till `docs/index.html`.
 Utan `--refresh` går skriptet aldrig ut på nätet.
+
+Databasen har fyra tabeller:
+
+| Tabell | Innehåll |
+|---|---|
+| `immigration` | år, landkod, födelseland, antal, källtabell |
+| `county` | år, län, antal, källtabell |
+| `birth_region` | SCB:s födelseregioner för 2025 |
+| `region_map` | världsdelsmappningen, inläst från `data/regions.csv` |
 
 Databasen kan frågas direkt:
 
@@ -115,6 +157,7 @@ tabellen, så kontrollera innan du drar slutsatser av just det året.
 | `START_YEAR` | `2005` | Första år som hämtas |
 | `AREA_N` | `7` | Antal färgade ytor i det staplade diagrammet |
 | `PANEL_N` | `13` | Antal länder som får en egen panel i småmultiplarna |
+| `PANEL_COLS` | `4` | Antal kolumner i småmultiplarna |
 | `RANK_BY` | `"peak"` | `"peak"` = största andel ett enskilt år, `"total"` = summa över perioden |
 | `ALWAYS_INCLUDE` | `("USA", "Storbritannien", "Ryssland")` | Får alltid en egen panel |
 | `INCLUDE_SWEDEN` | `True` | Ta med återinvandrade födda i Sverige |

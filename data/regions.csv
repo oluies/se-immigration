@@ -1,0 +1,209 @@
+code,country,region
+DZ,Algeriet,Afrika
+AO,Angola,Afrika
+BJ,Benin,Afrika
+BW,Botswana,Afrika
+BF,Burkina Faso,Afrika
+BI,Burundi,Afrika
+CF,Centralafrikanska republiken,Afrika
+CD,Demokratiska republiken Kongo,Afrika
+DJ,Djibouti,Afrika
+EG,Egypten,Afrika
+GQ,Ekvatorialguinea,Afrika
+CI,Elfenbenskusten,Afrika
+ER,Eritrea,Afrika
+SZ,Eswatini,Afrika
+ET,Etiopien,Afrika
+GA,Gabon,Afrika
+GM,Gambia,Afrika
+GH,Ghana,Afrika
+GN,Guinea,Afrika
+GW,Guinea-Bissau,Afrika
+CM,Kamerun,Afrika
+CV,Kap Verde,Afrika
+KE,Kenya,Afrika
+KM,Komorerna,Afrika
+CG,Kongo,Afrika
+LS,Lesotho,Afrika
+LR,Liberia,Afrika
+LY,Libyen,Afrika
+MG,Madagaskar,Afrika
+MW,Malawi,Afrika
+ML,Mali,Afrika
+MA,Marocko,Afrika
+MR,Mauretanien,Afrika
+MU,Mauritius,Afrika
+MZ,Moçambique,Afrika
+NA,Namibia,Afrika
+NE,Niger,Afrika
+NG,Nigeria,Afrika
+RW,Rwanda,Afrika
+ST,Sao Tomé och Principe,Afrika
+SN,Senegal,Afrika
+SC,Seychellerna,Afrika
+SL,Sierra Leone,Afrika
+SO,Somalia,Afrika
+SD,Sudan,Afrika
+ZA,Sydafrika,Afrika
+SS,Sydsudan,Afrika
+TZ,Tanzania,Afrika
+TD,Tchad,Afrika
+TG,Togo,Afrika
+TN,Tunisien,Afrika
+UG,Uganda,Afrika
+ZM,Zambia,Afrika
+ZW,Zimbabwe,Afrika
+AF,Afghanistan,Asien
+AM,Armenien,Asien
+AZ,Azerbajdzjan,Asien
+BH,Bahrain,Asien
+BD,Bangladesh,Asien
+BT,Bhutan,Asien
+BN,Brunei,Asien
+CY,Cypern,Asien
+PH,Filippinerna,Asien
+AE,Förenade Arabemiraten,Asien
+GZ,Gaza-området,Asien
+GE,Georgien,Asien
+HK,Hongkong,Asien
+IN,Indien,Asien
+ID,Indonesien,Asien
+IQ,Irak,Asien
+IR,Iran,Asien
+IL,Israel,Asien
+JP,Japan,Asien
+YE,Jemen,Asien
+JO,Jordanien,Asien
+KH,Kambodja,Asien
+KZ,Kazakstan,Asien
+CN,Kina,Asien
+KG,Kirgizistan,Asien
+KW,Kuwait,Asien
+LA,Laos,Asien
+LB,Libanon,Asien
+MY,Malaysia,Asien
+MV,Maldiverna,Asien
+MN,Mongoliet,Asien
+MM,Myanmar,Asien
+NP,Nepal,Asien
+KP,Nordkorea,Asien
+OM,Oman,Asien
+PK,Pakistan,Asien
+PS,Palestina,Asien
+QA,Qatar,Asien
+SA,Saudiarabien,Asien
+SG,Singapore,Asien
+LK,Sri Lanka,Asien
+KR,Sydkorea,Asien
+SY,Syrien,Asien
+TJ,Tadzjikistan ,Asien
+TW,Taiwan,Asien
+TH,Thailand,Asien
+TR,Turkiet,Asien
+TM,Turkmenistan,Asien
+UZ,Uzbekistan,Asien
+VN,Vietnam,Asien
+TL,Östtimor,Asien
+AL,Albanien,Europa
+AD,Andorra,Europa
+BY,Belarus,Europa
+BE,Belgien,Europa
+BA,Bosnien och Hercegovina,Europa
+BG,Bulgarien,Europa
+DK,Danmark,Europa
+EE,Estland,Europa
+FI,Finland,Europa
+FR,Frankrike,Europa
+GB,Förenade kungariket (Storbritannien och Nordirland),Europa
+GI,Gibraltar,Europa
+GR,Grekland,Europa
+VA,Heliga stolen (Vatikanen),Europa
+IE,Irland,Europa
+IS,Island,Europa
+IT,Italien,Europa
+YU,Jugoslavien,Europa
+XK,Kosovo,Europa
+HR,Kroatien,Europa
+LV,Lettland,Europa
+LI,Liechtenstein,Europa
+LT,Litauen,Europa
+LU,Luxemburg,Europa
+MT,Malta,Europa
+MD,Moldavien,Europa
+MC,Monaco,Europa
+ME,Montenegro,Europa
+NL,Nederländerna,Europa
+MK,Nordmakedonien,Europa
+NO,Norge,Europa
+PL,Polen,Europa
+PT,Portugal,Europa
+RO,Rumänien,Europa
+RU,Ryssland,Europa
+SM,San Marino,Europa
+CH,Schweiz,Europa
+RS,Serbien,Europa
+CS,Serbien och Montenegro,Europa
+SK,Slovakien,Europa
+SI,Slovenien,Europa
+SU,Sovjetunionen,Europa
+ES,Spanien,Europa
+SE,Sverige,Europa
+CZ,Tjeckien,Europa
+QT,Tjeckoslovakien,Europa
+DE,Tyskland,Europa
+UA,Ukraina,Europa
+HU,Ungern,Europa
+AT,Österrike,Europa
+AI,Anguilla,Nordamerika
+AG,Antigua och Barbuda,Nordamerika
+BS,Bahamas,Nordamerika
+BB,Barbados,Nordamerika
+BZ,Belize,Nordamerika
+BM,Bermuda,Nordamerika
+VG,Brittiska Jungfruöarna,Nordamerika
+CR,Costa Rica,Nordamerika
+DM,Dominica,Nordamerika
+DO,Dominikanska republiken,Nordamerika
+SV,El Salvador,Nordamerika
+US,Förenta staterna (USA),Nordamerika
+GD,Grenada,Nordamerika
+GT,Guatemala,Nordamerika
+HT,Haiti,Nordamerika
+HN,Honduras,Nordamerika
+JM,Jamaica,Nordamerika
+CA,Kanada,Nordamerika
+CU,Kuba,Nordamerika
+MX,Mexiko,Nordamerika
+NI,Nicaragua,Nordamerika
+PA,Panama,Nordamerika
+KN,Saint Kitts och Nevis,Nordamerika
+LC,Saint Lucia,Nordamerika
+VC,Saint Vincent och Grenadinerna,Nordamerika
+TT,Trinidad och Tobago,Nordamerika
+AU,Australien,Oceanien
+FJ,Fiji,Oceanien
+KI,Kiribati,Oceanien
+MH,Marshallöarna,Oceanien
+FM,Mikronesien,Oceanien
+NR,Nauru,Oceanien
+NZ,Nya Zeeland,Oceanien
+PW,Palau,Oceanien
+PG,Papua Nya Guinea,Oceanien
+SB,Salomonöarna,Oceanien
+WS,Samoa,Oceanien
+TO,Tonga,Oceanien
+TV,Tuvalu,Oceanien
+VU,Vanuatu,Oceanien
+ÖOF,okänt födelseland,Okänt
+AR,Argentina,Sydamerika
+BO,Bolivia,Sydamerika
+BR,Brasilien,Sydamerika
+CL,Chile,Sydamerika
+CO,Colombia,Sydamerika
+EC,Ecuador,Sydamerika
+GY,Guyana,Sydamerika
+PY,Paraguay,Sydamerika
+PE,Peru,Sydamerika
+SR,Surinam,Sydamerika
+UY,Uruguay,Sydamerika
+VE,Venezuela,Sydamerika
